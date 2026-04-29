@@ -10,3 +10,31 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: BROWSERLESS_SELF_URL
+        fromService:
+          name: browserless
+          type: pserv
+          property: hostport
+      - key: BROWSERLESS_SELF_TOKEN
+        value: 6R0W53R135510
+      - key: BROWSERLESS_API_URL
+        sync: false
+      - key: BROWSERLESS_API_TOKEN
+        sync: false
+
+  - type: pserv
+    name: browserless
+    runtime: docker
+    region: ohio
+    plan: starter
+    dockerfilePath: ./browserless/docker/chromium/Dockerfile
+    dockerContext: ./browserless
+    envVars:
+      - key: TOKEN
+        value: 6R0W53R135510
+      - key: CONCURRENT
+        value: "5"
+      - key: QUEUED
+        value: "10"
+      - key: TIMEOUT
+        value: "30000"

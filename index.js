@@ -2,11 +2,18 @@ const http = require("http");
 const https = require("https");
 const { URL } = require("url");
 const uaPool = require("./ua-pool.json");
+const { isBlocked } = require("./block-detect");
+const { fetchViaContent } = require("./browserless-client");
 
 const PORT = process.env.PORT || 3000;
 const REQUEST_TIMEOUT = 30_000;
 const DELAY_MIN_MS = 50;
 const DELAY_MAX_MS = 300;
+
+const BROWSERLESS_SELF_URL = process.env.BROWSERLESS_SELF_URL || "";
+const BROWSERLESS_SELF_TOKEN = process.env.BROWSERLESS_SELF_TOKEN || "";
+const BROWSERLESS_API_URL = process.env.BROWSERLESS_API_URL || "";
+const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN || "";
 
 const HEADERS_TO_STRIP = [
   "x-forwarded-for",
@@ -38,7 +45,6 @@ const HOP_BY_HOP_HEADERS = [
 
 const ACCEPT_LANGUAGE = "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7";
 
-// Chrome sends headers in this order
 const HEADER_ORDER = [
   "host",
   "connection",
@@ -61,7 +67,6 @@ const HEADER_ORDER = [
   "cf-ipcountry",
 ];
 
-// Per-host cookie jar (in-memory, clears on restart)
 const cookieJar = new Map();
 
 function pickUA() {
@@ -168,8 +173,8 @@ function extractTargetURL(requestUrl) {
   }
 }
 
-function storeCookies(hostname, res) {
-  const setCookies = res.headers["set-cookie"];
+function storeCookies(hostname, proxyRes) {
+  const setCookies = proxyRes.headers["set-cookie"];
   if (!setCookies) return;
 
   const existing = cookieJar.get(hostname) || "";
@@ -236,6 +241,50 @@ function forwardRequest(targetUrl, method, orderedHeaders, body) {
   });
 }
 
+// --- Strategy functions ---
+
+async function nativeStrategy(targetUrl, method, incomingHeaders, reqBody) {
+  await randomDelay();
+
+  const uaEntry = pickUA();
+  const browserHeaders = buildBrowserHeaders(uaEntry, targetUrl.hostname);
+  const merged = { ...incomingHeaders, ...browserHeaders };
+  const orderedHeaders = orderHeaders(merged);
+
+  const proxyRes = await forwardRequest(targetUrl, method, orderedHeaders, reqBody);
+
+  storeCookies(targetUrl.hostname, proxyRes);
+
+  const responseHeaders = {};
+  for (const [key, value] of Object.entries(proxyRes.headers)) {
+    if (!HOP_BY_HOP_HEADERS.includes(key.toLowerCase())) {
+      responseHeaders[key] = value;
+    }
+  }
+
+  const chunks = [];
+  for await (const chunk of proxyRes) {
+    chunks.push(chunk);
+  }
+  const body = Buffer.concat(chunks);
+
+  return { statusCode: proxyRes.statusCode, headers: responseHeaders, body };
+}
+
+async function selfHostedStrategy(targetUrl) {
+  if (!BROWSERLESS_SELF_URL) return { ok: false, error: "not configured" };
+  return fetchViaContent(BROWSERLESS_SELF_URL, BROWSERLESS_SELF_TOKEN, targetUrl.href);
+}
+
+async function apiStrategy(targetUrl) {
+  if (!BROWSERLESS_API_URL || !BROWSERLESS_API_TOKEN) {
+    return { ok: false, error: "not configured" };
+  }
+  return fetchViaContent(BROWSERLESS_API_URL, BROWSERLESS_API_TOKEN, targetUrl.href);
+}
+
+// --- Server ---
+
 const server = http.createServer(async (req, res) => {
   if (req.url === "/" || req.url === "") {
     return sendJSON(res, 200, { status: "ok" });
@@ -246,47 +295,72 @@ const server = http.createServer(async (req, res) => {
     return sendJSON(res, 400, { error: "invalid target URL" });
   }
 
-  await randomDelay();
-
-  const uaEntry = pickUA();
-  const browserHeaders = buildBrowserHeaders(uaEntry, targetUrl.hostname);
   const incomingHeaders = stripHeaders(req.headers);
-  const merged = { ...incomingHeaders, ...browserHeaders };
-  const orderedHeaders = orderHeaders(merged);
 
-  let body = null;
+  let reqBody = null;
   if (req.method !== "GET" && req.method !== "HEAD") {
     const chunks = [];
     for await (const chunk of req) {
       chunks.push(chunk);
     }
-    body = Buffer.concat(chunks);
+    reqBody = Buffer.concat(chunks);
   }
 
+  // Strategy 1: Native header-spoofing proxy
   try {
-    const proxyRes = await forwardRequest(
-      targetUrl,
-      req.method,
-      orderedHeaders,
-      body
-    );
-
-    storeCookies(targetUrl.hostname, proxyRes);
-
-    const responseHeaders = {};
-    for (const [key, value] of Object.entries(proxyRes.headers)) {
-      if (!HOP_BY_HOP_HEADERS.includes(key.toLowerCase())) {
-        responseHeaders[key] = value;
-      }
+    const result = await nativeStrategy(targetUrl, req.method, incomingHeaders, reqBody);
+    if (!isBlocked(result.statusCode, result.body)) {
+      result.headers["x-proxy-strategy"] = "native";
+      res.writeHead(result.statusCode, result.headers);
+      res.end(result.body);
+      return;
     }
-
-    res.writeHead(proxyRes.statusCode, responseHeaders);
-    proxyRes.pipe(res);
-  } catch {
-    sendJSON(res, 502, { error: "target unreachable" });
+    console.log(`[cascade] native blocked for ${targetUrl.hostname}`);
+  } catch (err) {
+    console.log(`[cascade] native error for ${targetUrl.hostname}: ${err.message}`);
   }
+
+  // Strategy 2: Self-hosted Browserless
+  try {
+    const result = await selfHostedStrategy(targetUrl);
+    if (result.ok && !isBlocked(result.statusCode, result.body)) {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "x-proxy-strategy": "browserless-self",
+      });
+      res.end(result.body);
+      return;
+    }
+    if (!result.ok) {
+      console.log(`[cascade] browserless-self error: ${result.error}`);
+    } else {
+      console.log(`[cascade] browserless-self blocked for ${targetUrl.hostname}`);
+    }
+  } catch (err) {
+    console.log(`[cascade] browserless-self error: ${err.message}`);
+  }
+
+  // Strategy 3: Cloud Browserless API
+  try {
+    const result = await apiStrategy(targetUrl);
+    if (result.ok) {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "x-proxy-strategy": "browserless-api",
+      });
+      res.end(result.body);
+      return;
+    }
+    console.log(`[cascade] browserless-api error: ${result.error}`);
+  } catch (err) {
+    console.log(`[cascade] browserless-api error: ${err.message}`);
+  }
+
+  sendJSON(res, 502, { error: "all strategies failed" });
 });
 
 server.listen(PORT, () => {
   console.log(`render-proxy listening on port ${PORT}`);
+  if (BROWSERLESS_SELF_URL) console.log(`  browserless-self: ${BROWSERLESS_SELF_URL}`);
+  if (BROWSERLESS_API_URL) console.log(`  browserless-api: ${BROWSERLESS_API_URL}`);
 });
