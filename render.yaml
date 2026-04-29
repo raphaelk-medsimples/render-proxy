@@ -11,27 +11,21 @@ services:
       - key: NODE_ENV
         value: production
       - key: BROWSERLESS_SELF_URL
-        fromService:
-          name: browserless
-          type: pserv
-          property: hostport
-      - key: BROWSERLESS_SELF_TOKEN
-        value: 6R0W53R135510
+        value: https://browserless-v3.onrender.com
       - key: BROWSERLESS_API_URL
         sync: false
       - key: BROWSERLESS_API_TOKEN
         sync: false
 
-  - type: pserv
-    name: browserless
+  - type: web
+    name: browserless-v3
     runtime: docker
     region: ohio
-    plan: starter
+    plan: free
     dockerfilePath: ./browserless/docker/chromium/Dockerfile
     dockerContext: ./browserless
+    healthCheckPath: /pressure
     envVars:
-      - key: TOKEN
-        value: 6R0W53R135510
       - key: CONCURRENT
         value: "5"
       - key: QUEUED

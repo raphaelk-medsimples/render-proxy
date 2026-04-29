@@ -10,7 +10,7 @@ const REQUEST_TIMEOUT = 30_000;
 const DELAY_MIN_MS = 50;
 const DELAY_MAX_MS = 300;
 
-const BROWSERLESS_SELF_URL = process.env.BROWSERLESS_SELF_URL || "";
+const BROWSERLESS_SELF_URL = process.env.BROWSERLESS_SELF_URL || "https://browserless-v3.onrender.com";
 const BROWSERLESS_SELF_TOKEN = process.env.BROWSERLESS_SELF_TOKEN || "";
 const BROWSERLESS_API_URL = process.env.BROWSERLESS_API_URL || "";
 const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN || "";

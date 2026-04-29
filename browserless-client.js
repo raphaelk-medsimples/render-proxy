@@ -2,7 +2,7 @@ const ACCEPT_LANGUAGE = "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7";
 const TIMEOUT = 30_000;
 
 async function fetchViaContent(browserlessUrl, token, targetUrl) {
-  const url = new URL("/content", browserlessUrl);
+  const url = new URL("/chromium/content", browserlessUrl);
   if (token) url.searchParams.set("token", token);
 
   const controller = new AbortController();
