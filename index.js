@@ -12,8 +12,8 @@ const DELAY_MAX_MS = 300;
 
 const BROWSERLESS_SELF_URL = process.env.BROWSERLESS_SELF_URL || "https://browserless-v3.onrender.com";
 const BROWSERLESS_SELF_TOKEN = process.env.BROWSERLESS_SELF_TOKEN || "";
-const BROWSERLESS_API_URL = process.env.BROWSERLESS_API_URL || "";
-const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN || "";
+const BROWSERLESS_API_URL = process.env.BROWSERLESS_API_URL || "https://production-sfo.browserless.io";
+const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN || process.env.BROWSERLESS_API_KEY || "";
 
 const HEADERS_TO_STRIP = [
   "x-forwarded-for",
