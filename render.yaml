@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: render-proxy
+    runtime: node
+    region: ohio
+    plan: free
+    buildCommand: echo "no build needed"
+    startCommand: node index.js
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
