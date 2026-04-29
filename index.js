@@ -280,7 +280,7 @@ async function apiStrategy(targetUrl) {
   if (!BROWSERLESS_API_URL || !BROWSERLESS_API_TOKEN) {
     return { ok: false, error: "not configured" };
   }
-  return fetchViaContent(BROWSERLESS_API_URL, BROWSERLESS_API_TOKEN, targetUrl.href);
+  return fetchViaContent(BROWSERLESS_API_URL, BROWSERLESS_API_TOKEN, targetUrl.href, { contentPath: "/content" });
 }
 
 // --- Server ---
